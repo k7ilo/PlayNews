@@ -14,15 +14,9 @@ fi
 # The following variable needs to be set if different for your install
 #
 # VOICEDIR - Directory for playnews voice files
-# Usually in the same directory as the playnews script
-
 VOICEDIR="$script_dir/audio_files"
 
 # TMPDIR - Directory for temporary file storage
-# Note if at all possible this should not be on the SD card.
-# Use of /tmp or a USB mounted stick is preferred
-# Note that the BBB may not have enough memory in /tmp to process
-
 TMPDIR="$script_dir/audio_tmp" 
 # End User defines
 
@@ -207,8 +201,7 @@ read -n 1
 
 fi
 
-# send ID and 10 second countdown
-#/usr/sbin/asterisk -rx "rpt fun $NODE *80"
+#10 Second Countdown
 echo
 echo "Starting in 10 seconds - Hit Ctrl C to interrupt"
 for (( X=10; X >= 1; X-- ))
