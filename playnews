@@ -11,8 +11,6 @@ if [ ! -f "$script_dir/playnews.ini" ]
 fi
 
 
-
-
 # SET THE FOLLOWING VARIABLES FOR THIS PARTICULAR INSTALL -------------------------------------------------------------------------------------
 #
 # VOICEDIR - Directory for playnews voice files
@@ -23,16 +21,12 @@ TMPDIR="$script_dir/audio_tmp"
 # End User defines
 
 
-
-
 # CHECK FOR THE PLAYNEWS VOICE FILES ----------------------------------------------------------------------------------------------------------
-if [ ! -f $VOICEDIR/ARNstart ]
+if [ ! -f $VOICEDIR/ARNstart.mp3 ]
   then
     echo "playnews voice files not found - check VOICEDIR in script"
     exit 1
 fi
-
-
 
 
 # CONFIGURE COMMAND FORMAT --------------------------------------------------------------------------------------------------------------------
@@ -51,43 +45,8 @@ if [ -z "$1" ]
      fi
 fi
 
-# --- Node number to play on or from
-if [[ ! $3 =~ ^-?[0-9]+$ ]]
-  then
-    echo "Node number required" 
-    exit 1
-  else
-     NODE=$3
-fi
 
-# --- Mode - 'localplay' or 'playback' (global)
-#     'localplay' only plays on the node specified
-#     'playback' plays on the specified node and ALL nodes connected to it
-#
-if [ -z $4 ]
-   then 
-     MODE="playback"
-   elif
-     [ ${4^^} == "L" ]
-       then
-         MODE="localplay"
-   elif
-     [ ${4^^} == "G" ]
-       then
-         MODE="playback"
-   else
-     echo "Wrong mode type - L for Local play, G or null for global play"
-     exit 1
-fi
-
-if [ $MODE == "playback" ]
-   then
-     MODETYPE="(global)"
-   else
-     MODETYPE="(local)"
-fi
-
-# --- Time to start - 24 hour time - required 2nd command line parameter
+# --- Time to start - 24 hour time. Always required as parameter 2
 #     Time example 03:19 = 3:19 AM, 22:45 = 10:45 PM 
 if [ ${2^^} != "NOW" ] && [[ !  $2 =~ ^[0-9][0-9]:[0-9][0-9]$ ]]
   then
@@ -97,23 +56,24 @@ fi
 TIME=$2
 
 
-
-
 # AUDIO DOWNLOAD, DIVISION AND CONVERSION -----------------------------------------------------------------------------------------------------
 #
-# --- Download Newsline or ARRL  and convert to wav
-rm -f $TMPDIR/news.mp3
-echo "Starting Download of $NEWSTYPE Audio News @ $(date +%H:%M:%S)"
+# --- Delete old MP3 files.
+sudo rm -f $TMPDIR/news.mp3
 
+
+# --- Download new Newsline or ARRL file
+echo "Downloading the new $NEWSTYPE Audio News @ $(date +%H:%M:%S)"
 # --- ARN_URL and ARRL_URL are set in playnews.ini
 if [ $NEWSTYPE == "ARN" ]
   then 
 # --- Timeout set to 15 seconds with 4 retries. Set the timeout longer for slow circuits.
-     wget -T 15 --tries=4 -O $TMPDIR/news.mp3 $ARN_URL 
+     sudo wget -T 15 --tries=4 -O $TMPDIR/news.mp3 $ARN_URL 
   else
 # --- not ARN so get ARRL
-     wget -T 15 --tries=4 -O $TMPDIR/news.mp3 $ARRL_URL
+     sudo wget -T 15 --tries=4 -O $TMPDIR/news.mp3 $ARRL_URL
 fi
+
 
 if [ -f $TMPDIR/news.mp3 ];
  then
@@ -122,6 +82,7 @@ else
  echo "Download failed"
  exit 0
 fi
+
 
 # --- On holidays ARRL does not put out a news MP3. Instead there is a 
 #     shorter HTML file. The following routine checks for this and
@@ -133,81 +94,68 @@ if [ $filesize -lt 100000 ]
     exit 0
 fi
 
-# --- Convert downloaded .mp3 file to .wav format
-echo "Converting from MP3 to .wav"
-lame -h --decode $TMPDIR/news.mp3 $TMPDIR/news2.wav &> /dev/null 2>&1
 
-# --- Get the length of the file in seconds
-LENGTH=`soxi -D $TMPDIR/news2.wav`
+# --- Calculate the length of the MP3 file into seconds
+LENGTH=`sudo soxi -D $TMPDIR/news.mp3`
 #echo $LENGTH
 START=0
+INCREMENT=150  # --- 2.5 minute = 150 seconds
 
-# --- 2.5 minute = 150 seconds
-INCREMENT=150
 
-# --- Calculate number of segments
+# --- Calculate the number of 2.5 minute segments
 MAXPART=`echo $LENGTH/$INCREMENT | bc` 
 let "MAXPART += 1"
 PART="1"
 #echo $MAXPART
 
-# --- Divide into 2.5 minute segments
+
+# --- Divide the MP3 file into 2.5 minute segments
 while [ "$PART" -le "$MAXPART" ]; do
-      sox --temp $TMPDIR $TMPDIR/news2.wav $TMPDIR/news.part$PART.wav trim $START $INCREMENT &> /dev/null 2>&1
-      echo "Creating $TMPDIR/news.part$PART.wav"
+      sudo sox --temp $TMPDIR $TMPDIR/news.mp3 $TMPDIR/news.part$PART.mp3 trim $START $INCREMENT &> /dev/null 2>&1
+      echo "Creating $TMPDIR/news.part$PART.mp3"
       START=$(($START-5+$INCREMENT))
 #     echo "$PART - $START - $INCREMENT  $(($START+$INCREMENT))"
       let "PART += 1"
 done
 
-# --- Convert each segment to ulaw format
-PART="1"
-while [ "$PART" -le "$MAXPART" ]; do
-      sox --temp $TMPDIR -V $TMPDIR/news.part$PART.wav -r 8000 -c 1 -t ul $TMPDIR/news.part$PART.ul &> /dev/null 2>&1
-      echo "Converting to $TMPDIR/news.part$PART.ul"
-      rm $TMPDIR/news.part$PART.wav
-      let "PART += 1"
-done
-
-
-
 
 # BROADCAST -----------------------------------------------------------------------------------------------------------------------------------
 if [ ${TIME^^} != "NOW" ]
 then
+echo "$NEWSTYPE news will start at $TIME with 5 and 10 minute pre-warnings"
 
-echo "$NEWSTYPE news will start at $TIME and use $MODE $MODETYPE mode on"
-echo "node - $NODE  with 5 and 10 minute pre-warnings"
- 
-# --- Last warning time - 5 minutes before
-TIME5=`date --date "$TIME now 5 minutes ago" +%H:%M`
+
 # --- First warning time - 10 minutes before
 TIME10=`date --date "$TIME now 10 minutes ago" +%H:%M`
 
-# --- Waiting to send 10 minute announcement
-echo "Waiting to send 10 minute warning"
+ 
+# --- Last warning time - 5 minutes before
+TIME5=`date --date "$TIME now 5 minutes ago" +%H:%M`
+
+
+# --- Waiting to play the 10 minute announcement
+echo "Waiting to play the 10 minute announcement"
 while [ $(date +%H:%M) != $TIME10 ]; do sleep 1; done
-   # Start 10 minute message, add 3 second delay to beginning
-   cat $VOICEDIR/silence3.ul "$VOICEDIR/${NEWSTYPE}start10.ul" > $TMPDIR/news.ul
-   /usr/sbin/asterisk -rx "rpt $MODE $NODE $TMPDIR/news"
+   # Start 10 minute message
+   /usr/bin/play -q "$VOICEDIR/${NEWSTYPE}start10.mp3" -t alsa
 
-# --- Waiting to send 5 minute announcement
-echo "Waiting to send 5 minute warning"
+
+# --- Waiting to play the 5 minute announcement
+echo "Waiting to play the 5 minute announcement"
 while [ $(date +%H:%M) != $TIME5 ]; do sleep 1; done
-   # Start 5 minute message, add 3 second delay to beginning
-   cat $VOICEDIR/silence3.ul "$VOICEDIR/${NEWSTYPE}start5.ul" > $TMPDIR/news.ul
-   /usr/sbin/asterisk -rx "rpt $MODE $NODE $TMPDIR/news"
+   # Start 5 minute message
+   /usr/bin/play -q "$VOICEDIR/${NEWSTYPE}start5.mp3" -t alsa
 
-# --- Waiting for start time
-echo "Waiting for start time"
+
+# --- Waiting for the start time
+echo "Waiting for the start time"
 while [ $(date +%H:%M) != $TIME ]; do sleep 1; done
-
 else
-
-echo "$NEWSTYPE news will start $TIME and use $MODE $MODETYPE mode on node - $NODE"
-echo -n "Press any key to start news..."
+echo "$NEWSTYPE news will start $TIME"
+echo -n "Press any key to start the news broadcast..."
 read -n 1 
 fi
+
 
 # --- 10 Second Countdown
 echo
@@ -219,36 +167,32 @@ do
 done
 echo
 
-# --- Send start announcment with a 3 second delay at the beginning
-cat $VOICEDIR/silence3.ul "$VOICEDIR/${NEWSTYPE}start.ul" > $TMPDIR/news.ul
-/usr/sbin/asterisk -rx "rpt $MODE $NODE $TMPDIR/news"
+
+# --- Play the start announcment
+   /usr/bin/play -q "$VOICEDIR/${NEWSTYPE}start.mp3" -t alsa
 sleep 10
 
-# --- Start the news broadcast
+
+# --- Play the news broadcast
 PART="1"
 while [ "$PART" -le "$MAXPART" ]; do
-      echo "Playing file $TMPDIR/news.part$PART.ul"
-      if [ "$PART" -lt  "$MAXPART" ]; then 
-         # Add Station break message with 1 second delay
-         cat $TMPDIR/news.part$PART.ul $VOICEDIR/silence1.ul "$VOICEDIR/${NEWSTYPE}continue.ul" > $TMPDIR/news.ul  
-         /usr/sbin/asterisk -rx "rpt $MODE $NODE $TMPDIR/news"
-         # Break every 2.5 minutes for 20 seconds
-         # Note this break has to be long enough for network ID's
-         sleep 175
-      else
-         # Append end message with 2 second delay
-         cat $TMPDIR/news.part$PART.ul $VOICEDIR/silence2.ul "$VOICEDIR/${NEWSTYPE}stop.ul" > $TMPDIR/news.ul
-         /usr/sbin/asterisk -rx "rpt $MODE $NODE $TMPDIR/news"
-         # Terminate script at end of audio
-         LENGTH=`soxi -D $TMPDIR/news.ul 2>/dev/null`
+      echo "Playing file $TMPDIR/news.part$PART.mp3"
+      if [ "$PART" -lt  "$MAXPART" ]; then          
+         /usr/bin/play -q $TMPDIR/news.part$PART.mp3 -t alsa
+         # Play 20 second Station break message every 2.5 minutes
+         /usr/bin/play -q "$VOICEDIR/${NEWSTYPE}continue.mp3" -t alsa
+         # 20 second timer
+         sleep 20
+      else        
+         /usr/bin/play -q "$VOICEDIR/${NEWSTYPE}stop.mp3" -t alsa        # Play end message
+         LENGTH=`soxi -D "$VOICEDIR/${NEWSTYPE}stop.mp3" 2>/dev/null`    # Terminate script at end of audio
          DELAY=${LENGTH/.*} 
          sleep $DELAY
       fi
       let "PART += 1"
 done
 
-# --- Remove all audio files downloaded and created by playnews
-rm -f $TMPDIR/news*
+# Remove all files created by playnews
+sudo rm -f $TMPDIR/news*
 
-# Done
 exit 0
